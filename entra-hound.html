@@ -118,7 +118,11 @@
   .notice.info { border-left-color: var(--accent); background: rgba(63,169,255,.06); }
   .status { display: flex; align-items: center; gap: 10px; color: var(--muted); font: 600 12.5px/1 var(--label); letter-spacing: .16em; text-transform: uppercase; min-height: 20px; margin-top: 12px; }
   .spinner { width: 14px; height: 14px; border-radius: 50%; border: 2px solid var(--line); border-top-color: var(--accent-2); animation: spin 1s linear infinite; flex: none; }
-  .tabs { display: flex; gap: 6px; flex-wrap: wrap; border-bottom: 1px solid var(--line); margin-bottom: 14px; }
+  .drop { border: 1px dashed var(--line); border-radius: 12px; padding: 28px 18px; text-align: center; cursor: pointer; display: grid; gap: 6px; background: rgba(255,255,255,.015); transition: border-color .15s ease, background .15s ease; }
+.drop:hover, .drop:focus-visible, .drop.over { border-color: var(--accent-2); background: rgba(143,227,255,.07); outline: none; }
+.drop b { font-size: 14.5px; }
+.drop span { color: var(--muted); font-size: 12.5px; }
+.tabs { display: flex; gap: 6px; flex-wrap: wrap; border-bottom: 1px solid var(--line); margin-bottom: 14px; }
   .tabs button { background: transparent; border: 0; border-bottom: 2px solid transparent; color: var(--muted); padding: 8px 12px; font: 700 12px/1 var(--label); letter-spacing: .16em; text-transform: uppercase; cursor: pointer; margin-bottom: -1px; }
   .tabs button.active { color: var(--accent-2); border-bottom-color: var(--accent-2); }
 
@@ -586,6 +590,7 @@
       <button class="active" data-auth="delegated" role="tab">Interactive sign-in</button>
       <button data-auth="token" role="tab">App / certificate / managed identity token</button>
       <button data-auth="demo" role="tab">Demo tenant</button>
+      <button data-auth="snapshot" role="tab">Saved snapshot</button>
     </div>
 
     <div id="auth-delegated">
@@ -634,6 +639,15 @@
         <label class="field" style="display:inline-grid">Size<select id="demo-size" style="width:auto"><option value="s">Small (~120 identities)</option><option value="m" selected>Medium (~600)</option><option value="l">Large (~2500)</option></select></label></div>
     </div>
 
+    <div id="auth-snapshot" class="hidden">
+      <h2>Re-open a collection from disk</h2>
+      <p class="intro">A snapshot is the raw collection exactly as Microsoft Graph returned it, written to a file on your machine by <b>Save snapshot</b>. Loading one rebuilds the graph, the attack paths, the risk scores and the findings offline — no sign-in, no token, not one call to <code>graph.microsoft.com</code>. Use it to pick an assessment back up later, to hand a collection to a colleague who has no access to the tenant, or to keep a dated record of what the tenant looked like. The JSON written by <b>Export → Everything</b> loads here too; it carries the same collection.</p>
+      <div class="drop" id="snapDrop" tabindex="0" role="button" aria-label="Choose or drop a snapshot file"><b>Drop a snapshot here</b><span>or click to choose one — <code>.json</code> or <code>.json.gz</code></span></div>
+      <input type="file" id="snapFile" class="hidden" accept=".json,.gz,application/json,application/gzip">
+      <div id="snapInfo"></div>
+      <div class="notice">A snapshot is the directory as collected: display names, user principal names, job titles, group and device names, sign-in dates. Treat the file exactly as you would the tenant export itself — it is personal data, and it should live wherever your other assessment evidence lives, not in a downloads folder. It holds no access token, client secret or signed-in account.</div>
+    </div>
+
     <div class="status" id="status"></div>
     <div id="err-box"></div>
   </section>
@@ -646,8 +660,9 @@
       <div class="panel">
         <div class="toolbar">
           <div><p class="kicker">Executive view</p><h2 id="tenantName">Tenant</h2></div>
-          <div class="actions"><span class="count" id="collectedAt"></span><button type="button" class="btn btn-ghost btn-sm" id="btn-recollect">Re-collect</button><button type="button" class="btn btn-ghost btn-sm" id="btn-report">HTML / PDF report</button></div>
+          <div class="actions"><span class="count" id="collectedAt"></span><button type="button" class="btn btn-ghost btn-sm" id="btn-recollect">Re-collect</button><button type="button" class="btn btn-ghost btn-sm" id="btn-snapshot">Save snapshot</button><button type="button" class="btn btn-ghost btn-sm" id="btn-report">HTML / PDF report</button></div>
         </div>
+        <div id="snapBanner" class="hidden"></div>
         <div class="score-row">
           <div class="gauge">
             <svg viewBox="0 0 260 260"><path class="arc track" d="M40 200 A110 110 0 1 1 220 200"/><path class="arc val" id="gaugeVal" d="M40 200 A110 110 0 1 1 220 200"/></svg>
@@ -777,7 +792,7 @@
         </div>
         <div class="panel">
           <p class="kicker">Export</p><h2>Take it with you</h2>
-          <p class="intro">Findings, attack paths, inventories, graph relationships, critical assets and remediation — as JSON, CSV or a self-contained HTML report (print it for PDF).</p>
+          <p class="intro">Findings, attack paths, inventories, graph relationships, critical assets and remediation — as JSON, CSV or a self-contained HTML report (print it for PDF). A <b>snapshot</b> is different: it writes the raw collection to a file you can load back under <b>Saved snapshot</b> on the start screen, rebuilding every path, score and finding offline without calling Graph again. It is the whole directory as collected, so keep it with your other assessment evidence.</p>
           <div class="actions" id="exportBtns"></div>
           <h4>Critical assets</h4>
           <p class="intro" style="font-size:12.5px">Tier-0 roles, role-assignable groups, service principals with tier-0 Graph permissions and the tenant are marked automatically. Right-click any node in the graph, or use the ★ in a detail panel, to add custom ones. Stored per tenant in this browser.</p>
@@ -1002,7 +1017,10 @@ EH.graph = (function(){
     }));
     return results;
   }
-  return { V1: V1, BETA: BETA, get: get, all: all, batch: batch, log: log, setOnLog: function(f){ onLog = f; }, resetLog: function(){ log.length = 0; } };
+  return { V1: V1, BETA: BETA, get: get, all: all, batch: batch, log: log, setOnLog: function(f){ onLog = f; }, resetLog: function(){ log.length = 0; },
+    // Replay a log that came from a snapshot. `log` is handed out by reference (doExport, renderCollection,
+    // report all read it), so it is refilled in place rather than reassigned.
+    setLog: function(entries){ log.length = 0; (entries || []).forEach(function(e){ log.push(e); }); } };
 })();
 
 /* -------------------- collector -------------------- */
@@ -1179,7 +1197,144 @@ EH.collector = (function(){
     emit('progress', 1);
     return raw;
   }
-  return { SOURCES: SOURCES, PHASE2: PHASE2, KNOWN_RESOURCES: KNOWN_RESOURCES, collect: collect, on: on, state: function(){ return state; }, raw: function(){ return raw; }, setRaw: function(r){ raw = r; }, setSrc: setSrc };
+  return { SOURCES: SOURCES, PHASE2: PHASE2, KNOWN_RESOURCES: KNOWN_RESOURCES, collect: collect, on: on, state: function(){ return state; }, raw: function(){ return raw; }, setRaw: function(r){ raw = r; }, setSrc: setSrc,
+    // Restore the per-source status of an earlier run. EH.coverage derives every "unknown is not none" caveat
+    // from this map, so a reloaded snapshot has to carry it or the gaps silently read as clean zeroes.
+    setState: function(s){ state = s || {}; Object.keys(state).forEach(function(k){ emit('source', k, state[k]); }); } };
+})();
+</script>
+<script>
+/* -------------------- snapshot: the collection on disk --------------------
+   The collector keeps everything it read in one plain object (EH.collector.raw()) and that object dies with the
+   tab. A snapshot writes it to a file and reads it back, so an assessment can be re-opened, handed to a colleague
+   or compared against itself later without touching graph.microsoft.com again.
+
+   What is written: the raw collection exactly as Graph returned it, plus the three things the analysis layer needs
+   to reproduce itself faithfully — the per-source status (EH.coverage turns it into the "not collected" caveats),
+   the request log, and any custom critical-asset overrides. What is never written: access tokens, MSAL accounts,
+   client secrets. The file is still the directory in full and must be handled as personal data.
+   ------------------------------------------------------------------------- */
+EH.snapshot = (function(){
+  var U = EH.util;
+  var FORMAT = 'entrahound.snapshot', VERSION = 1;
+
+  function tenantOf(raw){
+    if(raw && raw.org) return { id: raw.org.id, displayName: raw.org.displayName || raw.org.id };
+    if(raw && raw.who && raw.who.tenant) return { id: raw.who.tenant, displayName: raw.who.tenant };
+    return null;
+  }
+  // A cheap inventory so the load screen can describe a file before anything is rebuilt from it.
+  function counts(raw){
+    var c = {}, keys = ['users', 'groups', 'apps', 'sps', 'devices', 'caPolicies', 'roleDefinitions', 'oauthGrants', 'appRoleAssignments', 'agents'];
+    keys.forEach(function(k){ if(Array.isArray(raw[k])) c[k] = raw[k].length; });
+    ['groupMembers', 'roleMembers', 'fics', 'auMembers'].forEach(function(k){ if(raw[k] && typeof raw[k] === 'object') c[k] = Object.keys(raw[k]).length; });
+    return c;
+  }
+  function build(opts){
+    opts = opts || {};
+    var raw = opts.raw || EH.collector.raw();
+    if(!raw) throw new Error('Nothing collected yet.');
+    return {
+      tool: 'EntraHound', format: FORMAT, snapshotVersion: VERSION,
+      savedAt: new Date().toISOString(),
+      collectedAt: raw.collectedAt || null,
+      demo: !!raw.demo,
+      tenant: tenantOf(raw),
+      // provenance only — which identity ran the collection, never how it authenticated
+      collectedBy: raw.who ? { name: raw.who.name, kind: raw.who.kind } : null,
+      scopes: raw.scopes || null,
+      sourceState: opts.state || EH.collector.state() || {},
+      log: (opts.log || EH.graph.log || []).map(function(l){ return { t: l.t, ms: l.ms, status: l.status, url: l.url }; }),
+      criticalOverrides: opts.crit || null,
+      counts: counts(raw),
+      raw: raw
+    };
+  }
+  function fileName(snap, gz){
+    var t = snap.tenant || {};
+    return 'entrahound-snapshot-' + U.slug(t.displayName || t.id || 'tenant') + '-' + String(snap.savedAt || '').slice(0, 10) + '.json' + (gz ? '.gz' : '');
+  }
+  function canGzip(){ return typeof CompressionStream === 'function'; }
+  async function gzip(bytes){
+    var stream = new Blob([bytes]).stream().pipeThrough(new CompressionStream('gzip'));
+    return new Uint8Array(await new Response(stream).arrayBuffer());
+  }
+  async function gunzip(bytes){
+    if(typeof DecompressionStream !== 'function') throw new Error('This file is gzip-compressed and this browser cannot decompress it. Save the snapshot uncompressed, or open it in a current browser.');
+    var stream = new Blob([bytes]).stream().pipeThrough(new DecompressionStream('gzip'));
+    return new Uint8Array(await new Response(stream).arrayBuffer());
+  }
+
+  /* ---------- write ---------- */
+  // The File System Access API needs the user gesture that is still live when save() is called, so the picker is
+  // opened before the (potentially slow) serialisation. Browsers without it fall back to an ordinary download.
+  async function save(snap, opts){
+    opts = opts || {};
+    var gz = opts.compress !== false && canGzip();
+    var name = fileName(snap, gz), handle = null;
+    if(window.showSaveFilePicker){
+      try {
+        handle = await window.showSaveFilePicker({ suggestedName: name,
+          types: [{ description: 'EntraHound snapshot', accept: gz ? { 'application/gzip': ['.gz'] } : { 'application/json': ['.json'] } }] });
+      } catch(e){ if(e && e.name === 'AbortError') return null; handle = null; }
+    }
+    var bytes = new TextEncoder().encode(JSON.stringify(snap));
+    var plain = bytes.length;
+    if(gz) bytes = await gzip(bytes);
+    var blob = new Blob([bytes], { type: gz ? 'application/gzip' : 'application/json' });
+    if(handle){
+      var w = await handle.createWritable(); await w.write(blob); await w.close();
+      return { name: handle.name, bytes: bytes.length, plain: plain, gz: gz, picked: true };
+    }
+    var a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = name; document.body.appendChild(a); a.click();
+    setTimeout(function(){ URL.revokeObjectURL(a.href); a.remove(); }, 500);
+    return { name: name, bytes: bytes.length, plain: plain, gz: gz, picked: false };
+  }
+
+  /* ---------- read ---------- */
+  function looksCollected(o){
+    return !!(o && typeof o === 'object' && (Array.isArray(o.users) || Array.isArray(o.groups) || Array.isArray(o.sps) || Array.isArray(o.apps) || o.org));
+  }
+  // Accepts a snapshot and, because it embeds the same object under the same key, the "Everything (JSON)" export.
+  function parse(text){
+    var o;
+    try { o = JSON.parse(text); } catch(e){ throw new Error('That file is not valid JSON — ' + e.message); }
+    if(!o || typeof o !== 'object' || Array.isArray(o)) throw new Error('That file does not contain an EntraHound collection.');
+    var raw = looksCollected(o.raw) ? o.raw : (looksCollected(o) ? o : null);
+    if(!raw) throw new Error('No Entra collection in this file. Load a snapshot, or the JSON written by Export → Everything.');
+    if(o.snapshotVersion && o.snapshotVersion > VERSION) throw new Error('This snapshot was written by a newer EntraHound (format ' + o.snapshotVersion + ', this build reads ' + VERSION + ').');
+    return {
+      raw: raw,
+      state: o.sourceState || (o.collection && o.collection.sources) || {},
+      log: o.log || (o.collection && o.collection.log) || [],
+      crit: o.criticalOverrides || null,
+      meta: {
+        savedAt: o.savedAt || null,
+        collectedAt: o.collectedAt || raw.collectedAt || null,
+        tenant: o.tenant || tenantOf(raw),
+        collectedBy: o.collectedBy || (raw.who ? { name: raw.who.name, kind: raw.who.kind } : null),
+        demo: !!(o.demo || raw.demo),
+        counts: o.counts || counts(raw),
+        isSnapshotFile: o.format === FORMAT
+      }
+    };
+  }
+  async function read(file){
+    var bytes = new Uint8Array(await file.arrayBuffer());
+    if(bytes.length > 2 && bytes[0] === 0x1f && bytes[1] === 0x8b) bytes = await gunzip(bytes);   // gzip magic
+    return parse(new TextDecoder().decode(bytes));
+  }
+  // Put the modules back in the state they were in at the end of the original collection.
+  function restore(s){
+    var raw = s.raw;
+    raw.snapshot = true;
+    raw.snapshotMeta = s.meta;
+    EH.collector.setRaw(raw);
+    EH.collector.setState(s.state);
+    EH.graph.setLog(s.log);
+    return raw;
+  }
+  return { FORMAT: FORMAT, VERSION: VERSION, build: build, save: save, parse: parse, read: read, restore: restore, fileName: fileName, canGzip: canGzip, counts: counts };
 })();
 </script>
 <script>
@@ -1847,7 +2002,8 @@ EH.ui = (function(){
   /* ---------- dashboard ---------- */
   function renderDashboard(){
     var g = S.g, x = S.exposure, raw = S.raw;
-    el('tenantName').textContent = (raw.org && raw.org.displayName) || 'Tenant'; el('collectedAt').textContent = 'collected ' + new Date(raw.collectedAt).toLocaleString() + (raw.demo ? ' · DEMO DATA' : '');
+    el('tenantName').textContent = (raw.org && raw.org.displayName) || 'Tenant'; el('collectedAt').textContent = 'collected ' + new Date(raw.collectedAt).toLocaleString() + (raw.demo ? ' · DEMO DATA' : raw.snapshot ? ' · FROM SNAPSHOT' : '');
+    renderSnapBanner();
     el('gaugeVal').style.strokeDashoffset = 600; setTimeout(function(){ el('gaugeVal').style.strokeDashoffset = 600 - 518 * (x.score / 100); }, 60);
     U.animateNumber(el('scoreNum'), x.score, 1200); el('scoreGrade').textContent = 'Grade ' + x.grade; el('scoreGrade').style.color = x.grade === 'A' ? 'var(--ok)' : x.grade === 'B' ? 'var(--accent-2)' : x.grade === 'C' ? 'var(--warn)' : 'var(--bad)';
     var c = x.components;
@@ -2261,8 +2417,9 @@ EH.ui = (function(){
   function renderCollection(){
     var st = EH.collector.state(), all = EH.collector.SOURCES.concat(EH.collector.PHASE2);
     el('sources').innerHTML = all.map(function(s){ var x = st[s.key] || { st: 'skip', detail: S.raw.demo ? 'demo data' : '' }; return '<div class="src ' + x.st + '"><span class="dot"></span><span><span class="name">' + esc(s.label) + '</span> <span class="mono" style="opacity:.7">' + esc(EH.auth.GROUPS[s.group].label) + (s.alt ? ' or ' + EH.auth.GROUPS[s.alt].label : '') + '</span></span><span>' + esc(x.detail) + '</span></div>'; }).join('');
-    el('logTable').querySelector('tbody').innerHTML = EH.graph.log.slice(-300).reverse().map(function(l){ return '<tr><td class="mono">' + new Date(l.t).toLocaleTimeString() + '</td><td>' + l.status + '</td><td>' + l.ms + '</td><td class="mono" style="font-size:11px">' + esc(l.url) + '</td></tr>'; }).join('') || '<tr><td colspan="4" class="empty">' + (S.raw.demo ? 'Demo data — no Graph calls were made.' : 'No calls logged.') + '</td></tr>';
-    el('exportBtns').innerHTML = [['json', 'Everything (JSON)'], ['findings', 'Findings (CSV)'], ['paths', 'Attack paths (CSV)'], ['identities', 'Identities (CSV)'], ['apps', 'Applications (CSV)'], ['edges', 'Relationships (CSV)'], ['critical', 'Critical assets (CSV)'], ['remediation', 'Remediation (CSV)'], ['report', 'HTML report'], ['log', 'Collection log (CSV)']].map(function(b){ return '<button type="button" class="btn btn-ghost btn-sm" data-export="' + b[0] + '">' + b[1] + '</button>'; }).join('');
+    el('logTable').querySelector('tbody').innerHTML = EH.graph.log.slice(-300).reverse().map(function(l){ return '<tr><td class="mono">' + new Date(l.t).toLocaleTimeString() + '</td><td>' + l.status + '</td><td>' + l.ms + '</td><td class="mono" style="font-size:11px">' + esc(l.url) + '</td></tr>'; }).join('') || '<tr><td colspan="4" class="empty">' + (S.raw.demo ? 'Demo data — no Graph calls were made.' : S.raw.snapshot ? 'Loaded from a snapshot that carried no log — no Graph calls were made in this session.' : 'No calls logged.') + '</td></tr>';
+    if(S.raw.snapshot && EH.graph.log.length) el('logTable').querySelector('tbody').insertAdjacentHTML('afterbegin', '<tr><td colspan="4" class="empty">— replayed from the snapshot; no Graph calls were made in this session —</td></tr>');
+    el('exportBtns').innerHTML = [['snapshot', 'Save snapshot (reloadable)'], ['json', 'Everything (JSON)'], ['findings', 'Findings (CSV)'], ['paths', 'Attack paths (CSV)'], ['identities', 'Identities (CSV)'], ['apps', 'Applications (CSV)'], ['edges', 'Relationships (CSV)'], ['critical', 'Critical assets (CSV)'], ['remediation', 'Remediation (CSV)'], ['report', 'HTML report'], ['log', 'Collection log (CSV)']].map(function(b){ return '<button type="button" class="btn btn-ghost btn-sm" data-export="' + b[0] + '">' + b[1] + '</button>'; }).join('');
   }
   function renderCritical(){ var cs = []; S.g.nodes.forEach(function(n){ if(n.critical) cs.push(n); }); el('criticalList').innerHTML = cs.slice(0, 120).map(function(n){ return '<span class="chip" style="cursor:pointer;font-size:11px;padding:6px 9px" data-id="' + esc(n.id) + '"><span class="ntype" style="--c:' + COLOR[n.type] + '"><i></i></span> ' + esc(n.label) + (S.crit.add.indexOf(n.id) >= 0 ? ' <span style="color:var(--accent-2)">custom</span>' : '') + '</span>'; }).join('') + (cs.length > 120 ? '<span class="chip dim">+' + (cs.length - 120) + '</span>' : ''); }
 
@@ -2280,6 +2437,7 @@ EH.ui = (function(){
       case 'critical': rows = []; g.nodes.forEach(function(n){ if(n.critical) rows.push({ type: n.type, name: n.label, detail: n.sub, id: n.id, tier: n.tier, automatic: n.autoCritical, custom: S.crit.add.indexOf(n.id) >= 0, identitiesReaching: new Set(S.paths.filter(function(p){ return p.target === n.id; }).map(function(p){ return p.source; })).size }); }); U.download('entrahound-critical-' + name + '.csv', U.csv(rows, Object.keys(rows[0] || { type: 1 })), 'text/csv'); break;
       case 'remediation': { var seen = {}; rows = []; S.findings.forEach(function(f){ f.remediation.forEach(function(r){ var k = f.kind + '|' + r; if(!seen[k]){ seen[k] = { kind: f.kind, severity: f.sev, action: r, affected: 0 }; rows.push(seen[k]); } seen[k].affected++; }); }); U.download('entrahound-remediation-' + name + '.csv', U.csv(rows, ['severity', 'kind', 'action', 'affected']), 'text/csv'); break; }
       case 'log': U.download('entrahound-collection-log-' + name + '.csv', U.csv(EH.graph.log.map(function(l){ return { time: new Date(l.t).toISOString(), status: l.status, ms: l.ms, request: l.url }; }), ['time', 'status', 'ms', 'request']), 'text/csv'); break;
+      case 'snapshot': saveSnapshot(); break;
       case 'report': report(); break;
     }
   }
@@ -2357,12 +2515,64 @@ EH.ui = (function(){
       users: users, groups: groups, groupMembers: gm, apps: apps, sps: sps, fics: fics, resourceSps: resourceSps, appRoleAssignments: ara, oauthGrants: grants, directoryRoles: directoryRoles, roleMembers: roleMembers, roleDefinitions: roleDefs, roleAssignments: [], roleEligible: roleEligible, roleActivePim: [], aus: [au], auMembers: auMembers, auScoped: auScoped, devices: devices, caPolicies: caPolicies, authz: { defaultUserRolePermissions: { allowedToCreateApps: true, allowedToCreateSecurityGroups: true, allowedToCreateTenants: false }, guestUserRoleId: '10dae51f-b6af-4016-8d66-8c2a99b929b3', allowInvitesFrom: 'everyone', permissionGrantPolicyIdsAssignedToDefaultUserRole: ['ManagePermissionGrantsForSelf.microsoft-user-default-legacy'] }, secdef: { isEnabled: false }, xtapPartners: [{ tenantId: guid(), inboundTrust: { isMfaAccepted: true, isCompliantDeviceAccepted: false }, automaticUserConsentSettings: { inboundAllowed: true }, identitySynchronization: { userSyncInbound: { isSyncAllowed: true } } }], signins: signins, regDetails: reg, blueprints: [bp], bpPrincipals: [], agents: agents, agentOwners: agentOwners, agentSponsors: agentSponsors };
   }
 
+  /* ---------- snapshots ---------- */
+  function fmtBytes(n){ return n < 1024 ? n + ' B' : n < 1048576 ? (n / 1024).toFixed(0) + ' KB' : (n / 1048576).toFixed(1) + ' MB'; }
+  // A conclusion drawn from a snapshot is a conclusion about the tenant as it was, so the age of the collection
+  // rides along with the dashboard rather than being buried in the Collection view.
+  function renderSnapBanner(){
+    var b = el('snapBanner'), raw = S.raw;
+    if(!raw || !raw.snapshot){ b.className = 'hidden'; b.innerHTML = ''; return; }
+    var m = raw.snapshotMeta || {}, age = U.daysSince(raw.collectedAt);
+    b.className = 'notice' + (age != null && age > 30 ? ' bad' : age != null && age > 7 ? '' : ' info');
+    b.innerHTML = '<b>Offline snapshot.</b> Nothing here was read from Microsoft Graph in this session — the tenant is shown as it was collected '
+      + esc(new Date(raw.collectedAt).toLocaleString()) + (age != null ? ' (<b>' + age + ' day' + (age === 1 ? '' : 's') + ' ago</b>)' : '')
+      + (m.collectedBy && m.collectedBy.name ? ' by ' + esc(m.collectedBy.name) + ' · ' + esc(m.collectedBy.kind || '') : '')
+      + '. Anything changed in the tenant since then is invisible to this analysis. Sign in and re-collect for a current picture.';
+  }
+  async function saveSnapshot(){
+    if(!S.raw){ U.toast('Nothing to save yet.'); return; }
+    try {
+      var snap = EH.snapshot.build({ raw: S.raw, crit: S.crit });
+      var r = await EH.snapshot.save(snap);                       // null = the user cancelled the file picker
+      if(r) U.toast('Saved ' + r.name + ' · ' + fmtBytes(r.bytes) + (r.gz ? ' (gzip, from ' + fmtBytes(r.plain) + ')' : ''));
+    } catch(e){ console.error(e); U.toast('Could not save: ' + (e.message || e)); }
+  }
+  async function loadSnapshot(file){
+    var info = el('snapInfo');
+    el('err-box').innerHTML = ''; info.innerHTML = '';
+    setStatus('Reading ' + file.name + '…', true);
+    try {
+      var s = await EH.snapshot.read(file);
+      var m = s.meta, c = m.counts || {};
+      info.innerHTML = '<div class="notice ok"><b>' + esc((m.tenant && m.tenant.displayName) || 'Tenant') + '</b>'
+        + (m.collectedAt ? ' · collected ' + esc(new Date(m.collectedAt).toLocaleString()) : '')
+        + (m.demo ? ' · demo data' : '') + '<div style="margin-top:6px;color:var(--muted);font-size:12.5px">'
+        + esc(fmtBytes(file.size)) + ' · ' + esc(Object.keys(c).map(function(k){ return c[k] + ' ' + k; }).join(' · ') || 'no inventory recorded')
+        + (m.isSnapshotFile ? '' : ' · read from an Everything-JSON export') + '</div></div>';
+      setStatus('Rebuilding the graph offline…', true); await tick();
+      var raw = EH.snapshot.restore(s);
+      // Custom critical assets are kept per tenant in this browser; seed them from the file when this browser
+      // has never seen the tenant, so a snapshot opened elsewhere keeps the assessor's markings.
+      var tid = raw.org ? raw.org.id : (raw.who && raw.who.tenant) || 'tenant';
+      if(s.crit && !localStorage.getItem('eh_crit_' + tid)){ try { localStorage.setItem('eh_crit_' + tid, JSON.stringify(s.crit)); } catch(e){} }
+      el('who').innerHTML = 'Snapshot · <strong>' + esc((m.tenant && m.tenant.displayName) || 'tenant') + '</strong> · offline';
+      show('btn-signout');
+      await analyze(raw);
+      setStatus('');
+      U.toast('Loaded ' + file.name + ' — no Graph calls made.');
+    } catch(e){
+      setStatus('');
+      console.error(e);
+      el('err-box').innerHTML = '<div class="notice bad"><b>Could not load that snapshot.</b><div style="margin-top:6px">' + esc(e.message || String(e)) + '</div></div>';
+    }
+  }
+
   /* ---------- boot / events ---------- */
   function boot(){
     el('cfg-client').value = localStorage.getItem('eh_client') || ''; el('cfg-tenant').value = localStorage.getItem('eh_tenant') || '';
     if(EH.auth.REDIRECT_URI !== EH.auth.PROD_REDIRECT) el('localNote').innerHTML = ' — this copy runs at <code>' + esc(EH.auth.REDIRECT_URI) + '</code>; add that too while testing';
     el('stages').innerHTML = ['collect', 'normalise', 'relate', 'paths', 'risk', 'findings', 'render'].map(function(s){ return '<div data-stage="' + s + '">' + s + '</div>'; }).join('');
-    document.querySelectorAll('[data-auth]').forEach(function(b){ b.addEventListener('click', function(){ document.querySelectorAll('[data-auth]').forEach(function(x){ x.classList.toggle('active', x === b); }); ['delegated', 'token', 'demo'].forEach(function(k){ el('auth-' + k).classList.toggle('hidden', k !== b.getAttribute('data-auth')); }); }); });
+    document.querySelectorAll('[data-auth]').forEach(function(b){ b.addEventListener('click', function(){ document.querySelectorAll('[data-auth]').forEach(function(x){ x.classList.toggle('active', x === b); }); ['delegated', 'token', 'demo', 'snapshot'].forEach(function(k){ el('auth-' + k).classList.toggle('hidden', k !== b.getAttribute('data-auth')); }); }); });
     EH.collector.on('source', function(key, st){ var row = document.querySelector('.src[data-key="' + key + '"]'); if(row){ row.className = 'src ' + st.st; row.lastElementChild.textContent = st.detail; } });
     EH.collector.on('progress', function(f){ el('progBar').style.width = Math.round(f * 100) + '%'; var busy = Object.values(EH.collector.state()).filter(function(s){ return s.st === 'busy'; }).length; setStatus('Collecting… ' + Math.round(f * 100) + '%' + (busy ? ' · ' + busy + ' sources in flight' : ''), true); });
     EH.graph.setOnLog(function(e){ var tb = el('logTable').querySelector('tbody'); if(!tb) return; });
@@ -2380,7 +2590,25 @@ EH.ui = (function(){
     el('cfg-token').addEventListener('input', function(){ var c = U.jwtPayload(el('cfg-token').value.trim()); el('tokenInfo').innerHTML = c ? '<div class="notice info">tenant <code>' + esc(c.tid) + '</code> · ' + (c.scp ? 'delegated as <b>' + esc(c.upn || c.preferred_username || '') + '</b> · scp: <code>' + esc(c.scp) + '</code>' : 'app-only <b>' + esc(c.app_displayname || c.appid || '') + '</b> · roles: <code>' + esc((c.roles || []).join(' ')) + '</code>') + ' · expires ' + new Date(c.exp * 1000).toLocaleTimeString() + '</div>' : ''; });
     el('btn-demo').addEventListener('click', async function(){ el('err-box').innerHTML = ''; setStatus('Generating demo tenant…', true); await tick(); var raw = demo(el('demo-size').value); el('who').innerHTML = 'Demo tenant <strong>Contoso</strong>'; show('btn-signout'); EH.collector.setRaw(raw); try { await analyze(raw); } catch(e){ console.error(e); el('err-box').innerHTML = '<div class="notice bad">' + esc(e.message) + '</div>'; } setStatus(''); });
     el('btn-signout').addEventListener('click', function(){ EH.auth.signOut(); hide('app'); hide('views'); show('hero'); show('connectCard'); hide('btn-signout'); el('who').innerHTML = '<em>Not connected</em>'; setStatus('Disconnected.'); });
-    el('btn-recollect').addEventListener('click', function(){ if(S.raw.demo){ el('btn-demo').click(); return; } connectAndRun(function(){ return EH.auth.who(); }); });
+    // snapshot: choose, drop, save
+    el('snapDrop').addEventListener('click', function(){ el('snapFile').click(); });
+    el('snapDrop').addEventListener('keydown', function(e){ if(e.key === 'Enter' || e.key === ' '){ e.preventDefault(); el('snapFile').click(); } });
+    el('snapFile').addEventListener('change', function(){ var f = this.files && this.files[0]; this.value = ''; if(f) loadSnapshot(f); });
+    ['dragenter', 'dragover'].forEach(function(ev){ el('snapDrop').addEventListener(ev, function(e){ e.preventDefault(); this.classList.add('over'); }); });
+    ['dragleave', 'drop'].forEach(function(ev){ el('snapDrop').addEventListener(ev, function(e){ e.preventDefault(); this.classList.remove('over'); }); });
+    el('snapDrop').addEventListener('drop', function(e){ var f = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0]; if(f) loadSnapshot(f); });
+    el('btn-snapshot').addEventListener('click', saveSnapshot);
+    el('btn-recollect').addEventListener('click', function(){
+      if(S.raw.demo){ el('btn-demo').click(); return; }
+      // A snapshot has no session behind it: re-collecting means connecting to the tenant again.
+      if(S.raw.snapshot && !EH.auth.mode()){
+        hide('app'); hide('views'); show('hero'); show('connectCard');
+        document.querySelector('[data-auth="delegated"]').click();
+        setStatus('This analysis came from a snapshot. Sign in to collect the tenant as it is now.');
+        return;
+      }
+      connectAndRun(function(){ return EH.auth.who(); });
+    });
     el('btn-report').addEventListener('click', report);
     document.querySelectorAll('#views button').forEach(function(b){ b.addEventListener('click', function(){ setView(b.getAttribute('data-view')); }); });
     // delegated clicks
